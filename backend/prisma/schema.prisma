@@ -1,0 +1,283 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  documentId   String?   @unique
+  email        String?   @unique
+  passwordHash String?
+  pinCodeHash  String?
+  role         String    @default("WAITER")
+  isActive     Boolean   @default(true)
+  
+  orders       Order[]
+  shifts       Shift[]
+  cashShifts   CashShift[]
+  wasteLogs    WasteLog[]
+  
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([role])
+}
+
+model Table {
+  id           String    @id @default(uuid())
+  number       Int       @unique
+  capacity     Int       @default(4)
+  status       String    @default("AVAILABLE")
+  posX         Float     @default(0)
+  posY         Float     @default(0)
+  
+  mergedIntoId String?
+  mergedInto   Table?    @relation("TableMerges", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedTables Table[]   @relation("TableMerges")
+
+  orders       Order[]
+  reservations Reservation[]
+  isActive     Boolean   @default(true)
+  
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status])
+}
+
+model Reservation {
+  id              String    @id @default(uuid())
+  customerName    String
+  customerPhone   String?
+  guestsCount     Int       @default(2)
+  reservationDate DateTime
+  notes           String?
+  status          String    @default("CONFIRMED")
+
+  tableId         String
+  table           Table     @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([tableId])
+  @@index([reservationDate])
+  @@index([status])
+}
+
+model Shift {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  openedAt    DateTime  @default(now())
+  closedAt    DateTime?
+  totalSales  Float     @default(0)
+  totalTips   Float     @default(0)
+  ordersCount Int       @default(0)
+  isOpen      Boolean   @default(true)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId, isOpen])
+  @@index([openedAt])
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+  
+  products    Product[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Product {
+  id             String                 @id @default(uuid())
+  name           String
+  description    String?
+  price          Float
+  imageUrl       String?
+  isAvailable    Boolean                @default(true)
+  station        String                 @default("KITCHEN") // KITCHEN | BAR
+  categoryId     String
+  
+  category       Category               @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  orderItems     OrderItem[]
+  modifierGroups ProductModifierGroup[]
+
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@index([categoryId])
+  @@index([isAvailable])
+  @@index([station])
+}
+
+model ModifierGroup {
+  id          String                 @id @default(uuid())
+  name        String                 // Ej: "Término de la Carne", "Adicionales / Toppings", "Salsa"
+  minSelect   Int                    @default(0) // 0 = opcional, 1 = obligatorio
+  maxSelect   Int                    @default(1) // 1 = radio (única), >1 = checkbox (múltiple)
+  isRequired  Boolean                @default(false)
+  
+  options     ModifierOption[]
+  products    ProductModifierGroup[]
+
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+}
+
+model ModifierOption {
+  id                 String              @id @default(uuid())
+  groupId            String
+  group              ModifierGroup       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name               String              // Ej: "Término Medio", "Tocineta Extra"
+  price              Float               @default(0.0) // Costo adicional ($0 o >0)
+  isAvailable        Boolean             @default(true)
+
+  orderItemModifiers OrderItemModifier[]
+
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([groupId])
+}
+
+model ProductModifierGroup {
+  id        String        @id @default(uuid())
+  productId String
+  product   Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  groupId   String
+  group     ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, groupId])
+  @@index([productId])
+  @@index([groupId])
+}
+
+model Order {
+  id                 String      @id @default(uuid())
+  orderNumber        Int         @default(1)
+  status             String      @default("RECEIVED")
+  paymentStatus      String      @default("PENDING")
+  paymentMethod      String?     @default("EFECTIVO")
+  
+  subtotal           Float       @default(0.0)
+  tipAmount          Float       @default(0.0)
+  total              Float       @default(0.0)
+  
+  notes              String?
+  cancellationReason String?
+  cancelledAt        DateTime?
+  
+  tableId            String
+  table              Table       @relation(fields: [tableId], references: [id], onDelete: Restrict)
+  
+  userId             String
+  user               User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  items              OrderItem[]
+
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  paidAt             DateTime?
+
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([userId, paidAt])
+}
+
+model OrderItem {
+  id          String              @id @default(uuid())
+  quantity    Int                 @default(1)
+  unitPrice   Float
+  subtotal    Float
+  notes       String?
+  station     String              @default("KITCHEN") // KITCHEN | BAR
+  status      String              @default("PENDING") // PENDING | IN_PROGRESS | READY | DELIVERED
+
+  orderId     String
+  order       Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  productId   String
+  product     Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  modifiers   OrderItemModifier[]
+
+  createdAt   DateTime            @default(now())
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([station])
+  @@index([status])
+}
+
+model OrderItemModifier {
+  id          String          @id @default(uuid())
+  orderItemId String
+  orderItem   OrderItem       @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  optionId    String?
+  option      ModifierOption? @relation(fields: [optionId], references: [id], onDelete: SetNull)
+  name        String
+  price       Float           @default(0.0)
+
+  createdAt   DateTime        @default(now())
+
+  @@index([orderItemId])
+}
+
+model WasteLog {
+  id          String    @id @default(uuid())
+  reason      String    // "Error de digitación", "Plato quemado / defectuoso", "Cliente desistió por demora"
+  notes       String?
+  cost        Float     @default(0.0)
+  productName String
+  quantity    Int       @default(1)
+  orderId     String?
+  
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model CashShift {
+  id              String    @id @default(uuid())
+  openedById      String
+  openedBy        User      @relation(fields: [openedById], references: [id], onDelete: Restrict)
+  openedAt        DateTime  @default(now())
+  initialCash     Float     @default(0.0)
+
+  closedAt        DateTime?
+  expectedCash    Float     @default(0.0)
+  actualCash      Float     @default(0.0)
+  difference      Float     @default(0.0)
+
+  totalSalesCash  Float     @default(0.0)
+  totalSalesCard  Float     @default(0.0)
+  totalSalesTrans Float     @default(0.0)
+  totalTips       Float     @default(0.0)
+  ordersCount     Int       @default(0)
+
+  notes           String?
+  isOpen          Boolean   @default(true)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([isOpen])
+  @@index([openedAt])
+}
